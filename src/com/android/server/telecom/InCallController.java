@@ -48,6 +48,10 @@ import android.os.RemoteException;
 import android.os.Trace;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.os.VibrationAttributes;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.provider.Settings;
 import android.telecom.CallAudioState;
 import android.telecom.CallEndpoint;
 import android.telecom.ConnectionService;
@@ -85,6 +89,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.sun.provider.SettingsExt;
+
 /**
  * Binds to {@link IInCallService} and provides the service to {@link CallsManager} through which it
  * can send updates to the in-call app. This class is created and owned by CallsManager and retains
@@ -108,6 +114,12 @@ public class InCallController extends CallsManagerListenerBase implements
     public void setAnomalyReporterAdapter(AnomalyReporterAdapter mAnomalyReporterAdapter){
         mAnomalyReporter = mAnomalyReporterAdapter;
     }
+
+    private final VibrationEffect CALL_VIBRATION_EFFECT =
+            VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK);
+
+    private final VibrationAttributes CALL_VIBRATION_ATTRIBUTE =
+            VibrationAttributes.createForUsage(VibrationAttributes.USAGE_HARDWARE_FEEDBACK);;
 
     public class InCallServiceConnection {
         /**
@@ -1270,6 +1282,8 @@ public class InCallController extends CallsManagerListenerBase implements
 
     private final CarModeTracker mCarModeTracker;
 
+    private final Vibrator mVibrator;
+
     /**
      * The package name of the app which is showing the calling UX.
      */
@@ -1316,6 +1330,7 @@ public class InCallController extends CallsManagerListenerBase implements
         mContext = context;
         mAppOpsManager = context.getSystemService(AppOpsManager.class);
         mSensorPrivacyManager = context.getSystemService(SensorPrivacyManager.class);
+        mVibrator = context.getSystemService(Vibrator.class);
         mLock = lock;
         mCallsManager = callsManager;
         mSystemStateHelper = systemStateHelper;
@@ -1665,6 +1680,25 @@ public class InCallController extends CallsManagerListenerBase implements
         Log.i(this, "onCallStateChanged: Call state changed for TC@%s: %s -> %s", call.getId(),
                 CallState.toString(oldState), CallState.toString(newState));
         maybeTrackMicrophoneUse(isMuted());
+
+        if (oldState == CallState.DIALING && newState == CallState.ACTIVE) {
+            final boolean vibrateOnConnect = Settings.System.getIntForUser(
+                    mContext.getContentResolver(),
+                    SettingsExt.System.VIBRATE_ON_CONNECT,
+                    1, UserHandle.USER_CURRENT) == 1;
+            if (vibrateOnConnect) {
+                mVibrator.vibrate(CALL_VIBRATION_EFFECT, CALL_VIBRATION_ATTRIBUTE);
+            }
+        } else if (oldState == CallState.ACTIVE && newState == CallState.DISCONNECTED) {
+            final boolean vibrateOnDisconnect = Settings.System.getIntForUser(
+                    mContext.getContentResolver(),
+                    SettingsExt.System.VIBRATE_ON_DISCONNECT,
+                    1, UserHandle.USER_CURRENT) == 1;
+            if (vibrateOnDisconnect) {
+                mVibrator.vibrate(CALL_VIBRATION_EFFECT, CALL_VIBRATION_ATTRIBUTE);
+            }
+        }
+
         updateCall(call);
     }
 
