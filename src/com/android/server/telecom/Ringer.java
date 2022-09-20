@@ -31,6 +31,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.database.ContentObserver;
 import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
 import android.content.res.Resources;
@@ -71,6 +72,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
+
+import org.sun.os.VibrationPatternManager;
+import org.sun.os.VibrationPatternManager.Type;
+import org.sun.provider.SettingsExt;
 
 /**
  * Controls the ringtone player.
@@ -233,6 +238,9 @@ public class Ringer {
      */
     private final Object mLock;
 
+    private final SettingsObserver mSettingsObserver;
+    private int mVibrationPattern;
+
     /** Initializes the Ringer. */
     @VisibleForTesting
     public Ringer(
@@ -263,9 +271,8 @@ public class Ringer {
         mAudioManager = mContext.getSystemService(AudioManager.class);
         mAccessibilityManagerAdapter = accessibilityManagerAdapter;
 
-        mDefaultVibrationEffect =
-                loadDefaultRingVibrationEffect(
-                        mContext, mVibrator, mVibrationEffectProxy, featureFlags);
+        mSettingsObserver = new SettingsObserver(getHandler());
+        mSettingsObserver.observe();
 
         mIsHapticPlaybackSupportedByDevice =
                 mSystemSettingsUtil.isHapticPlaybackSupported(mContext);
@@ -1154,5 +1161,29 @@ public class Ringer {
             VibrationEffectProxy vibrationEffectProxy) {
         return vibrationEffectProxy.createWaveform(SIMPLE_VIBRATION_PATTERN,
                 SIMPLE_VIBRATION_AMPLITUDE, REPEAT_SIMPLE_VIBRATION_AT);
+    }
+
+    private final class SettingsObserver extends ContentObserver {
+        public SettingsObserver(Handler handler) {
+            super(handler);
+        }
+        public void observe() {
+            mContext.getContentResolver().registerContentObserver(Settings.System.getUriFor(
+                    SettingsExt.System.VIBRATION_PATTERN_RINGTONE),
+                    false, this, UserHandle.USER_ALL);
+            updateVibrationEffect();
+        }
+        @Override
+        public void onChange(boolean SelfChange) {
+            updateVibrationEffect();
+        }
+        private void updateVibrationEffect() {
+            final int patternNumber = Settings.System.getIntForUser(
+                    mContext.getContentResolver(),
+                    SettingsExt.System.VIBRATION_PATTERN_RINGTONE,
+                    0, UserHandle.USER_CURRENT);
+            mDefaultVibrationEffect = VibrationPatternManager.getVibrationFromNumber(
+                    patternNumber, Type.RINGTONE);
+        }
     }
 }
